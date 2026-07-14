@@ -10,7 +10,8 @@
     background: #000;
     overflow: hidden;
     height: 100%;
-    cursor: crosshair;
+    cursor: none;
+    font-family: "Courier New", monospace;
   }
   canvas {
     display: block;
@@ -20,41 +21,126 @@
     position: fixed;
     top: 8px;
     left: 12px;
+    right: 12px;
     color: #0f0;
-    font-family: "Courier New", monospace;
     font-size: 18px;
     text-shadow: 0 0 4px #0f0;
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
   }
-  #gameover {
+  #hud span.label { color: #6f6; font-size: 13px; }
+  .overlay {
     position: fixed;
-    top: 40%;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.88);
+    color: #0f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    text-shadow: 0 0 6px #0f0;
+  }
+  .overlay h1 {
+    font-size: 48px;
+    letter-spacing: 4px;
+    margin-bottom: 4px;
+  }
+  .overlay .sub {
+    color: #6f6;
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .overlay p.instructions {
+    max-width: 560px;
+    color: #9f9;
+    font-size: 15px;
+    line-height: 1.6;
+    margin-bottom: 24px;
+  }
+  .diffRow { display: flex; gap: 14px; margin-bottom: 26px; }
+  .btn {
+    font-family: inherit;
+    font-size: 17px;
+    padding: 10px 22px;
+    background: #012a01;
+    border: 2px solid #0f0;
+    color: #0f0;
+    cursor: pointer;
+    text-shadow: 0 0 4px #0f0;
+  }
+  .btn:hover { background: #0f0; color: #000; }
+  .btn.selected { background: #0f0; color: #000; }
+  .btn.big { font-size: 22px; padding: 14px 40px; }
+  #waveBanner {
+    position: fixed;
+    top: 45%;
     left: 50%;
     transform: translate(-50%, -50%);
-    color: #f00;
-    font-family: "Courier New", monospace;
-    font-size: 36px;
-    text-align: center;
-    text-shadow: 0 0 8px #f00;
+    color: #ff0;
+    font-size: 40px;
+    text-shadow: 0 0 10px #ff0;
     display: none;
+    pointer-events: none;
+    text-align: center;
   }
-  #gameover button {
-    display: block;
-    margin: 16px auto 0;
-    font-family: "Courier New", monospace;
-    font-size: 18px;
-    padding: 8px 20px;
-    cursor: pointer;
+  #waveBanner .bonus { font-size: 18px; color: #9f9; margin-top: 8px; }
+  #pauseHint {
+    position: fixed;
+    bottom: 8px;
+    left: 12px;
+    color: #063;
+    font-size: 12px;
   }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">SCORE: <span id="score">0</span></div>
-<div id="gameover">
-  GAME OVER<br>
-  FINAL SCORE: <span id="finalScore">0</span>
-  <button id="restartBtn">RESTART</button>
+
+<div id="hud" style="display:none">
+  <div><span class="label">SCORE</span> <span id="score">0</span></div>
+  <div><span class="label">WAVE</span> <span id="wave">1</span></div>
+  <div><span class="label">AMMO</span> <span id="ammo">30</span></div>
+  <div><span class="label">CITIES</span> <span id="citiesLeft">6</span></div>
+  <div><span class="label">HIGH</span> <span id="highScore">0</span></div>
 </div>
+
+<div id="waveBanner"></div>
+<div id="pauseHint">P = pause</div>
+
+<div id="menu" class="overlay">
+  <h1>MISSILE COMMAND</h1>
+  <div class="sub">a small clone, for Dad</div>
+  <p class="instructions">
+    Enemy missiles fall from the sky toward your cities (blue) and your
+    missile batteries (green). <b>Click anywhere</b> to fire an interceptor
+    from your nearest battery &mdash; it explodes where you clicked and
+    destroys any enemy missile caught in the blast. Protect your cities as
+    long as you can. Game ends when every city is destroyed.
+  </p>
+  <div class="diffRow" id="diffRow">
+    <button class="btn" data-diff="easy">EASY</button>
+    <button class="btn selected" data-diff="normal">NORMAL</button>
+    <button class="btn" data-diff="hard">HARD</button>
+  </div>
+  <button class="btn big" id="startBtn">START GAME</button>
+</div>
+
+<div id="pauseOverlay" class="overlay" style="display:none">
+  <h1>PAUSED</h1>
+  <button class="btn big" id="resumeBtn">RESUME</button>
+</div>
+
+<div id="gameover" class="overlay" style="display:none">
+  <h1 style="color:#f00; text-shadow:0 0 8px #f00;">GAME OVER</h1>
+  <p class="instructions" style="color:#f99">
+    FINAL SCORE: <span id="finalScore">0</span><br>
+    WAVE REACHED: <span id="finalWave">1</span>
+  </p>
+  <button class="btn big" id="restartBtn">PLAY AGAIN</button>
+</div>
+
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -67,34 +153,69 @@ resize();
 
 const GROUND_Y = () => canvas.height - 40;
 
+const DIFFICULTY = {
+  easy:   { spawnInterval: 1500, speedMin: 0.045, speedMax: 0.07,  ammoPerSilo: 12 },
+  normal: { spawnInterval: 1100, speedMin: 0.06,  speedMax: 0.10,  ammoPerSilo: 10 },
+  hard:   { spawnInterval: 750,  speedMin: 0.09,  speedMax: 0.15,  ammoPerSilo: 8 }
+};
+
+let diff = 'normal';
+let state = 'menu'; // menu | playing | paused | wavebreak | gameover
 let score = 0;
+let wave = 1;
 let cities = [];
 let silos = [];
 let enemyMissiles = [];
 let playerMissiles = [];
 let explosions = [];
-let gameOver = false;
 let spawnTimer = 0;
-let spawnInterval = 1500;
+let missilesThisWave = 0;
+let missilesSpawnedCount = 0;
+let bannerTimer = 0;
+let mouseX = canvas.width / 2, mouseY = canvas.height / 2;
+
+const highScoreKey = 'missileCommandHighScore';
+function getHighScore() { return parseInt(localStorage.getItem(highScoreKey) || '0', 10); }
+function setHighScore(v) { localStorage.setItem(highScoreKey, String(v)); }
 
 function setupLevel() {
   cities = [];
   silos = [];
   const w = canvas.width;
-  // 3 silos, 6 cities interspersed, roughly evenly spaced
   const positions = [0.05, 0.16, 0.27, 0.38, 0.5, 0.62, 0.73, 0.84, 0.95];
-  silos.push({ x: w * positions[0], ammo: 10, alive: true });
+  const d = DIFFICULTY[diff];
+  silos.push({ x: w * positions[0], ammo: d.ammoPerSilo, alive: true });
   cities.push({ x: w * positions[1], alive: true });
   cities.push({ x: w * positions[2], alive: true });
-  silos.push({ x: w * positions[4], ammo: 10, alive: true });
+  silos.push({ x: w * positions[4], ammo: d.ammoPerSilo, alive: true });
   cities.push({ x: w * positions[5], alive: true });
   cities.push({ x: w * positions[6], alive: true });
   cities.push({ x: w * positions[7], alive: true });
-  silos.push({ x: w * positions[8], ammo: 10, alive: true });
+  silos.push({ x: w * positions[8], ammo: d.ammoPerSilo, alive: true });
+}
+
+function startWave() {
+  const d = DIFFICULTY[diff];
+  missilesThisWave = 5 + wave * 2;
+  missilesSpawnedCount = 0;
+  spawnTimer = 0;
+  for (const s of silos) {
+    if (s.alive) s.ammo = d.ammoPerSilo;
+  }
+  showWaveBanner(`WAVE ${wave}`, '', 1400);
+  state = 'playing';
+}
+
+function showWaveBanner(text, sub, duration) {
+  const el = document.getElementById('waveBanner');
+  el.innerHTML = text + (sub ? `<div class="bonus">${sub}</div>` : '');
+  el.style.display = 'block';
+  bannerTimer = duration;
 }
 
 function spawnMissile() {
   const w = canvas.width;
+  const d = DIFFICULTY[diff];
   const startX = Math.random() * w;
   const targets = cities.filter(c => c.alive).concat(silos.filter(s => s.alive));
   if (targets.length === 0) return;
@@ -103,17 +224,16 @@ function spawnMissile() {
     x: startX, y: 0,
     tx: target.x, ty: GROUND_Y(),
     target,
-    speed: 0.06 + Math.random() * 0.03,
+    speed: d.speedMin + Math.random() * (d.speedMax - d.speedMin),
     trail: []
   });
 }
 
 function fireInterceptor(tx, ty) {
-  // find nearest alive silo with ammo
   let best = null, bestDist = Infinity;
   for (const s of silos) {
     if (!s.alive || s.ammo <= 0) continue;
-    const d = Math.abs(s.x - tx);
+    const d = Math.hypot(s.x - tx, GROUND_Y() - ty);
     if (d < bestDist) { bestDist = d; best = s; }
   }
   if (!best) return;
@@ -121,7 +241,7 @@ function fireInterceptor(tx, ty) {
   playerMissiles.push({
     x: best.x, y: GROUND_Y(),
     tx, ty,
-    speed: 0.5,
+    speed: 0.55,
     trail: []
   });
 }
@@ -130,21 +250,57 @@ function explode(x, y) {
   explosions.push({ x, y, r: 4, maxR: 45, growing: true });
 }
 
+canvas.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+
 canvas.addEventListener('mousedown', (e) => {
-  if (gameOver) return;
+  if (state !== 'playing') return;
   fireInterceptor(e.clientX, e.clientY);
 });
 
-function update(dt) {
-  if (gameOver) return;
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+    if (state === 'playing') togglePause(true);
+    else if (state === 'paused') togglePause(false);
+  }
+});
 
-  spawnTimer += dt;
-  if (spawnTimer > spawnInterval) {
-    spawnTimer = 0;
-    spawnMissile();
+function togglePause(pause) {
+  if (pause) {
+    state = 'paused';
+    document.getElementById('pauseOverlay').style.display = 'flex';
+  } else {
+    state = 'playing';
+    document.getElementById('pauseOverlay').style.display = 'none';
+  }
+}
+
+function update(dt) {
+  if (bannerTimer > 0) {
+    bannerTimer -= dt;
+    if (bannerTimer <= 0) {
+      document.getElementById('waveBanner').style.display = 'none';
+    }
   }
 
-  // enemy missiles
+  if (state === 'wavebreak') {
+    if (bannerTimer <= 0) startWave();
+    return;
+  }
+  if (state !== 'playing') return;
+
+  const d = DIFFICULTY[diff];
+  if (missilesSpawnedCount < missilesThisWave) {
+    spawnTimer += dt;
+    if (spawnTimer > d.spawnInterval) {
+      spawnTimer = 0;
+      spawnMissile();
+      missilesSpawnedCount++;
+    }
+  }
+
   for (const m of enemyMissiles) {
     const dx = m.tx - m.x, dy = m.ty - m.y;
     const dist = Math.hypot(dx, dy);
@@ -162,7 +318,6 @@ function update(dt) {
   }
   enemyMissiles = enemyMissiles.filter(m => !m.hit);
 
-  // player missiles
   for (const m of playerMissiles) {
     const dx = m.tx - m.x, dy = m.ty - m.y;
     const dist = Math.hypot(dx, dy);
@@ -179,7 +334,6 @@ function update(dt) {
   }
   playerMissiles = playerMissiles.filter(m => !m.hit);
 
-  // explosions
   for (const ex of explosions) {
     if (ex.growing) {
       ex.r += 1.2;
@@ -190,11 +344,10 @@ function update(dt) {
   }
   explosions = explosions.filter(ex => ex.r > 0);
 
-  // collisions: explosions destroy enemy missiles in range
   for (const ex of explosions) {
     for (const m of enemyMissiles) {
-      const d = Math.hypot(m.x - ex.x, m.y - ex.y);
-      if (d < ex.r) {
+      const dd = Math.hypot(m.x - ex.x, m.y - ex.y);
+      if (dd < ex.r) {
         m.hit = true;
         score += 25;
       }
@@ -202,17 +355,37 @@ function update(dt) {
   }
   enemyMissiles = enemyMissiles.filter(m => !m.hit);
 
-  // check ground impacts on cities/silos (missiles that reached target)
   document.getElementById('score').textContent = score;
+  document.getElementById('wave').textContent = wave;
+  const totalAmmo = silos.reduce((sum, s) => sum + (s.alive ? s.ammo : 0), 0);
+  document.getElementById('ammo').textContent = totalAmmo;
+  document.getElementById('citiesLeft').textContent = cities.filter(c => c.alive).length;
 
-  // check game over
   const anyCity = cities.some(c => c.alive);
-  const anySilo = silos.some(s => s.alive);
   if (!anyCity) {
-    gameOver = true;
-    document.getElementById('finalScore').textContent = score;
-    document.getElementById('gameover').style.display = 'block';
+    endGame();
+    return;
   }
+
+  // wave clear: all missiles spawned, none left flying, no explosions pending
+  if (missilesSpawnedCount >= missilesThisWave && enemyMissiles.length === 0 && explosions.length === 0) {
+    const bonus = cities.filter(c => c.alive).length * 100 + silos.filter(s => s.alive).length * 50;
+    score += bonus;
+    wave++;
+    state = 'wavebreak';
+    showWaveBanner(`WAVE ${wave - 1} CLEAR`, `+${bonus} bonus`, 1800);
+  }
+}
+
+function endGame() {
+  state = 'gameover';
+  bannerTimer = 0;
+  document.getElementById('waveBanner').style.display = 'none';
+  document.getElementById('hud').style.display = 'none';
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('finalWave').textContent = wave;
+  if (score > getHighScore()) setHighScore(score);
+  document.getElementById('gameover').style.display = 'flex';
 }
 
 function draw() {
@@ -220,27 +393,29 @@ function draw() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const gy = GROUND_Y();
-  // ground
   ctx.fillStyle = '#333';
   ctx.fillRect(0, gy, canvas.width, canvas.height - gy);
 
-  // cities
   for (const c of cities) {
-    ctx.fillStyle = c.alive ? '#0af' : '#222';
+    ctx.fillStyle = c.alive ? '#0af' : '#221';
     ctx.fillRect(c.x - 15, gy - 20, 30, 20);
   }
-  // silos
   for (const s of silos) {
-    ctx.fillStyle = s.alive ? '#0f0' : '#222';
+    ctx.fillStyle = s.alive ? '#0f0' : '#221';
     ctx.beginPath();
     ctx.moveTo(s.x - 18, gy);
     ctx.lineTo(s.x, gy - 25);
     ctx.lineTo(s.x + 18, gy);
     ctx.closePath();
     ctx.fill();
+    if (s.alive) {
+      ctx.fillStyle = '#000';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(s.ammo, s.x, gy - 6);
+    }
   }
 
-  // enemy missile trails
   ctx.strokeStyle = '#f66';
   ctx.lineWidth = 2;
   for (const m of enemyMissiles) {
@@ -253,7 +428,6 @@ function draw() {
     ctx.stroke();
   }
 
-  // player missile trails
   ctx.strokeStyle = '#0ff';
   for (const m of playerMissiles) {
     ctx.beginPath();
@@ -265,35 +439,69 @@ function draw() {
     ctx.stroke();
   }
 
-  // explosions
   for (const ex of explosions) {
     ctx.fillStyle = 'rgba(255, 200, 0, 0.6)';
     ctx.beginPath();
     ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  if (state === 'playing') {
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mouseX - 10, mouseY);
+    ctx.lineTo(mouseX + 10, mouseY);
+    ctx.moveTo(mouseX, mouseY - 10);
+    ctx.lineTo(mouseX, mouseY + 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 }
 
 let lastTime = performance.now();
 function loop(now) {
-  const dt = now - lastTime;
+  const dt = Math.min(now - lastTime, 50);
   lastTime = now;
   update(dt);
   draw();
   requestAnimationFrame(loop);
 }
 
-document.getElementById('restartBtn').addEventListener('click', () => {
+function newGame() {
   score = 0;
+  wave = 1;
   enemyMissiles = [];
   playerMissiles = [];
   explosions = [];
-  gameOver = false;
-  setupLevel();
+  bannerTimer = 0;
+  document.getElementById('waveBanner').style.display = 'none';
+  document.getElementById('highScore').textContent = getHighScore();
+  document.getElementById('hud').style.display = 'flex';
   document.getElementById('gameover').style.display = 'none';
+  setupLevel();
+  startWave();
+}
+
+document.querySelectorAll('#diffRow .btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#diffRow .btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    diff = btn.dataset.diff;
+  });
 });
 
-setupLevel();
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('menu').style.display = 'none';
+  newGame();
+});
+document.getElementById('restartBtn').addEventListener('click', () => {
+  document.getElementById('menu').style.display = 'flex';
+});
+document.getElementById('resumeBtn').addEventListener('click', () => togglePause(false));
+
 requestAnimationFrame(loop);
 </script>
 </body>
