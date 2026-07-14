@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Missile Command</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #000;
+    overflow: hidden;
+    height: 100%;
+    cursor: crosshair;
+  }
+  canvas {
+    display: block;
+    background: #000;
+  }
+  #hud {
+    position: fixed;
+    top: 8px;
+    left: 12px;
+    color: #0f0;
+    font-family: "Courier New", monospace;
+    font-size: 18px;
+    text-shadow: 0 0 4px #0f0;
+  }
+  #gameover {
+    position: fixed;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #f00;
+    font-family: "Courier New", monospace;
+    font-size: 36px;
+    text-align: center;
+    text-shadow: 0 0 8px #f00;
+    display: none;
+  }
+  #gameover button {
+    display: block;
+    margin: 16px auto 0;
+    font-family: "Courier New", monospace;
+    font-size: 18px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">SCORE: <span id="score">0</span></div>
+<div id="gameover">
+  GAME OVER<br>
+  FINAL SCORE: <span id="finalScore">0</span>
+  <button id="restartBtn">RESTART</button>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const GROUND_Y = () => canvas.height - 40;
+
+let score = 0;
+let cities = [];
+let silos = [];
+let enemyMissiles = [];
+let playerMissiles = [];
+let explosions = [];
+let gameOver = false;
+let spawnTimer = 0;
+let spawnInterval = 1500;
+
+function setupLevel() {
+  cities = [];
+  silos = [];
+  const w = canvas.width;
+  // 3 silos, 6 cities interspersed, roughly evenly spaced
+  const positions = [0.05, 0.16, 0.27, 0.38, 0.5, 0.62, 0.73, 0.84, 0.95];
+  silos.push({ x: w * positions[0], ammo: 10, alive: true });
+  cities.push({ x: w * positions[1], alive: true });
+  cities.push({ x: w * positions[2], alive: true });
+  silos.push({ x: w * positions[4], ammo: 10, alive: true });
+  cities.push({ x: w * positions[5], alive: true });
+  cities.push({ x: w * positions[6], alive: true });
+  cities.push({ x: w * positions[7], alive: true });
+  silos.push({ x: w * positions[8], ammo: 10, alive: true });
+}
+
+function spawnMissile() {
+  const w = canvas.width;
+  const startX = Math.random() * w;
+  const targets = cities.filter(c => c.alive).concat(silos.filter(s => s.alive));
+  if (targets.length === 0) return;
+  const target = targets[Math.floor(Math.random() * targets.length)];
+  enemyMissiles.push({
+    x: startX, y: 0,
+    tx: target.x, ty: GROUND_Y(),
+    target,
+    speed: 0.06 + Math.random() * 0.03,
+    trail: []
+  });
+}
+
+function fireInterceptor(tx, ty) {
+  // find nearest alive silo with ammo
+  let best = null, bestDist = Infinity;
+  for (const s of silos) {
+    if (!s.alive || s.ammo <= 0) continue;
+    const d = Math.abs(s.x - tx);
+    if (d < bestDist) { bestDist = d; best = s; }
+  }
+  if (!best) return;
+  best.ammo--;
+  playerMissiles.push({
+    x: best.x, y: GROUND_Y(),
+    tx, ty,
+    speed: 0.5,
+    trail: []
+  });
+}
+
+function explode(x, y) {
+  explosions.push({ x, y, r: 4, maxR: 45, growing: true });
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  if (gameOver) return;
+  fireInterceptor(e.clientX, e.clientY);
+});
+
+function update(dt) {
+  if (gameOver) return;
+
+  spawnTimer += dt;
+  if (spawnTimer > spawnInterval) {
+    spawnTimer = 0;
+    spawnMissile();
+  }
+
+  // enemy missiles
+  for (const m of enemyMissiles) {
+    const dx = m.tx - m.x, dy = m.ty - m.y;
+    const dist = Math.hypot(dx, dy);
+    const step = m.speed * dt;
+    if (dist <= step) {
+      m.hit = true;
+      explode(m.tx, m.ty);
+      if (m.target && m.target.alive) m.target.alive = false;
+    } else {
+      m.trail.push({ x: m.x, y: m.y });
+      if (m.trail.length > 20) m.trail.shift();
+      m.x += (dx / dist) * step;
+      m.y += (dy / dist) * step;
+    }
+  }
+  enemyMissiles = enemyMissiles.filter(m => !m.hit);
+
+  // player missiles
+  for (const m of playerMissiles) {
+    const dx = m.tx - m.x, dy = m.ty - m.y;
+    const dist = Math.hypot(dx, dy);
+    const step = m.speed * dt;
+    if (dist <= step) {
+      m.hit = true;
+      explode(m.tx, m.ty);
+    } else {
+      m.trail.push({ x: m.x, y: m.y });
+      if (m.trail.length > 20) m.trail.shift();
+      m.x += (dx / dist) * step;
+      m.y += (dy / dist) * step;
+    }
+  }
+  playerMissiles = playerMissiles.filter(m => !m.hit);
+
+  // explosions
+  for (const ex of explosions) {
+    if (ex.growing) {
+      ex.r += 1.2;
+      if (ex.r >= ex.maxR) ex.growing = false;
+    } else {
+      ex.r -= 0.8;
+    }
+  }
+  explosions = explosions.filter(ex => ex.r > 0);
+
+  // collisions: explosions destroy enemy missiles in range
+  for (const ex of explosions) {
+    for (const m of enemyMissiles) {
+      const d = Math.hypot(m.x - ex.x, m.y - ex.y);
+      if (d < ex.r) {
+        m.hit = true;
+        score += 25;
+      }
+    }
+  }
+  enemyMissiles = enemyMissiles.filter(m => !m.hit);
+
+  // check ground impacts on cities/silos (missiles that reached target)
+  document.getElementById('score').textContent = score;
+
+  // check game over
+  const anyCity = cities.some(c => c.alive);
+  const anySilo = silos.some(s => s.alive);
+  if (!anyCity) {
+    gameOver = true;
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('gameover').style.display = 'block';
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const gy = GROUND_Y();
+  // ground
+  ctx.fillStyle = '#333';
+  ctx.fillRect(0, gy, canvas.width, canvas.height - gy);
+
+  // cities
+  for (const c of cities) {
+    ctx.fillStyle = c.alive ? '#0af' : '#222';
+    ctx.fillRect(c.x - 15, gy - 20, 30, 20);
+  }
+  // silos
+  for (const s of silos) {
+    ctx.fillStyle = s.alive ? '#0f0' : '#222';
+    ctx.beginPath();
+    ctx.moveTo(s.x - 18, gy);
+    ctx.lineTo(s.x, gy - 25);
+    ctx.lineTo(s.x + 18, gy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // enemy missile trails
+  ctx.strokeStyle = '#f66';
+  ctx.lineWidth = 2;
+  for (const m of enemyMissiles) {
+    ctx.beginPath();
+    if (m.trail.length) {
+      ctx.moveTo(m.trail[0].x, m.trail[0].y);
+      for (const p of m.trail) ctx.lineTo(p.x, p.y);
+    }
+    ctx.lineTo(m.x, m.y);
+    ctx.stroke();
+  }
+
+  // player missile trails
+  ctx.strokeStyle = '#0ff';
+  for (const m of playerMissiles) {
+    ctx.beginPath();
+    if (m.trail.length) {
+      ctx.moveTo(m.trail[0].x, m.trail[0].y);
+      for (const p of m.trail) ctx.lineTo(p.x, p.y);
+    }
+    ctx.lineTo(m.x, m.y);
+    ctx.stroke();
+  }
+
+  // explosions
+  for (const ex of explosions) {
+    ctx.fillStyle = 'rgba(255, 200, 0, 0.6)';
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+let lastTime = performance.now();
+function loop(now) {
+  const dt = now - lastTime;
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+document.getElementById('restartBtn').addEventListener('click', () => {
+  score = 0;
+  enemyMissiles = [];
+  playerMissiles = [];
+  explosions = [];
+  gameOver = false;
+  setupLevel();
+  document.getElementById('gameover').style.display = 'none';
+});
+
+setupLevel();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
