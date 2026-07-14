@@ -35,6 +35,18 @@ you have on Windows).
 - Score bonus points for every city and battery still standing at the
   end of a wave.
 
+### Global leaderboard
+
+When the game ends, type in your **initials** and your score is sent to
+a shared online **top-10 leaderboard**, which is then shown to you — so
+you can see how you stack up against everyone else playing. Only the ten
+best scores of all time are kept.
+
+If your computer isn't connected to the internet when a game ends, the
+game just tells you it couldn't reach the leaderboard (your local high
+score is still saved as usual) — you can keep playing offline and try
+submitting again later.
+
 ### Controls
 
 | Key / action        | What it does                  |
@@ -49,8 +61,9 @@ be there next time you play.
 ## Nothing to install, nothing to worry about
 
 This is a single file (`index.html`) — everything (graphics, sound,
-game logic) is built in, with no downloads, accounts, ads, or internet
-connection required to play. It won't install anything on your
-computer or change any settings.
+game logic) is built in, with no downloads, accounts, or ads. It won't
+install anything on your computer or change any settings. An internet
+connection is only used to submit and show the online leaderboard when a
+game ends; the game itself plays perfectly well offline.
 
 Have fun!

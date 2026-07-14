@@ -73,6 +73,47 @@
   .btn:hover { background: #0f0; color: #000; }
   .btn.selected { background: #0f0; color: #000; }
   .btn.big { font-size: 22px; padding: 14px 40px; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn:disabled:hover { background: #012a01; color: #0f0; }
+  #initialsEntry { margin-bottom: 22px; }
+  #initialsInput {
+    font-family: inherit;
+    font-size: 40px;
+    letter-spacing: 12px;
+    text-align: center;
+    width: 180px;
+    padding: 6px 6px 6px 18px;
+    background: #001500;
+    border: 2px solid #0f0;
+    color: #0f0;
+    text-shadow: 0 0 6px #0f0;
+    text-transform: uppercase;
+    margin: 10px auto 16px;
+    display: block;
+    box-sizing: border-box;
+  }
+  #initialsInput:focus { outline: none; box-shadow: 0 0 12px #0f0; }
+  #leaderboard { margin-bottom: 22px; }
+  table.lb {
+    border-collapse: collapse;
+    margin: 6px auto 10px;
+    font-size: 16px;
+    color: #9f9;
+  }
+  table.lb th {
+    color: #6f6;
+    font-size: 12px;
+    font-weight: normal;
+    padding: 2px 14px;
+    border-bottom: 1px solid #063;
+    text-align: right;
+  }
+  table.lb th.name, table.lb td.name { text-align: left; }
+  table.lb td { padding: 3px 14px; text-align: right; }
+  table.lb tr.you td { color: #ff0; text-shadow: 0 0 6px #ff0; }
+  table.lb td.rank { color: #6f6; }
+  .lbStatus { color: #6f6; font-size: 13px; min-height: 18px; }
+  .lbStatus.err { color: #f99; }
   #waveBanner {
     position: fixed;
     top: 45%;
@@ -153,6 +194,21 @@
     FINAL SCORE: <span id="finalScore">0</span><br>
     WAVE REACHED: <span id="finalWave">1</span>
   </p>
+
+  <div id="initialsEntry">
+    <div class="sub">ENTER YOUR INITIALS FOR THE LEADERBOARD</div>
+    <input id="initialsInput" maxlength="3" autocomplete="off" spellcheck="false"
+           inputmode="latin" aria-label="Your initials" />
+    <button class="btn" id="submitScoreBtn">SUBMIT SCORE</button>
+  </div>
+
+  <div id="leaderboard" style="display:none">
+    <div class="sub">GLOBAL TOP 10</div>
+    <table class="lb" id="lbTable"></table>
+  </div>
+
+  <div class="lbStatus" id="lbStatus"></div>
+
   <button class="btn big" id="restartBtn">PLAY AGAIN</button>
 </div>
 
@@ -197,6 +253,41 @@ let noAmmoFlash = 0;
 const highScoreKey = 'missileCommandHighScore';
 function getHighScore() { return parseInt(localStorage.getItem(highScoreKey) || '0', 10); }
 function setHighScore(v) { localStorage.setItem(highScoreKey, String(v)); }
+
+// ---- Online leaderboard (Supabase REST) ----------------------------------
+// Global top-10 board. The database keeps only the 10 best scores; this page
+// only ever submits a score and reads the list back, using a public key.
+const LEADERBOARD = {
+  url: 'https://guzoywuckuvubvkvnyoe.supabase.co',
+  key: 'sb_publishable_RaTqK1GDou-HhX38cpOSgQ_Lv_fNnf2',
+  table: 'missile_command_leaderboard'
+};
+const lastInitialsKey = 'missileCommandInitials';
+
+function submitScore(entry) {
+  return fetch(`${LEADERBOARD.url}/rest/v1/${LEADERBOARD.table}`, {
+    method: 'POST',
+    headers: {
+      'apikey': LEADERBOARD.key,
+      'Authorization': `Bearer ${LEADERBOARD.key}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify(entry)
+  }).then(res => {
+    if (!res.ok) throw new Error('submit failed (' + res.status + ')');
+  });
+}
+
+function fetchLeaderboard() {
+  const q = 'select=initials,score,wave,difficulty&order=score.desc,created_at.asc&limit=10';
+  return fetch(`${LEADERBOARD.url}/rest/v1/${LEADERBOARD.table}?${q}`, {
+    headers: { 'apikey': LEADERBOARD.key, 'Authorization': `Bearer ${LEADERBOARD.key}` }
+  }).then(res => {
+    if (!res.ok) throw new Error('fetch failed (' + res.status + ')');
+    return res.json();
+  });
+}
 
 const muteKey = 'missileCommandMuted';
 const Sound = (() => {
@@ -354,6 +445,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
+  if (e.target && e.target.tagName === 'INPUT') return;
   if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
     if (state === 'playing') togglePause(true);
     else if (state === 'paused') togglePause(false);
@@ -495,6 +587,8 @@ function update(dt) {
   }
 }
 
+let scoreSubmitted = false;
+
 function endGame() {
   state = 'gameover';
   bannerTimer = 0;
@@ -503,8 +597,85 @@ function endGame() {
   document.getElementById('finalScore').textContent = score;
   document.getElementById('finalWave').textContent = wave;
   if (score > getHighScore()) setHighScore(score);
+
+  // Reset leaderboard UI to the initials-entry step for this run.
+  scoreSubmitted = false;
+  document.getElementById('leaderboard').style.display = 'none';
+  const entry = document.getElementById('initialsEntry');
+  entry.style.display = 'block';
+  const input = document.getElementById('initialsInput');
+  input.value = localStorage.getItem(lastInitialsKey) || '';
+  const submitBtn = document.getElementById('submitScoreBtn');
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'SUBMIT SCORE';
+  const status = document.getElementById('lbStatus');
+  status.className = 'lbStatus';
+  status.textContent = '';
+
   document.getElementById('gameover').style.display = 'flex';
   Sound.gameOver();
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+}
+
+function renderLeaderboard(rows, youIndex) {
+  const diffTag = { easy: 'E', normal: 'N', hard: 'H' };
+  let html = '<tr><th class="rank">#</th><th class="name">NAME</th>'
+           + '<th>SCORE</th><th>WAVE</th><th>DIFF</th></tr>';
+  rows.forEach((r, i) => {
+    const cls = i === youIndex ? ' class="you"' : '';
+    html += `<tr${cls}>`
+          + `<td class="rank">${i + 1}</td>`
+          + `<td class="name">${escapeHtml(r.initials)}</td>`
+          + `<td>${r.score}</td>`
+          + `<td>${r.wave}</td>`
+          + `<td>${diffTag[r.difficulty] || '?'}</td>`
+          + '</tr>';
+  });
+  if (rows.length === 0) html += '<tr><td colspan="5">No scores yet — be the first!</td></tr>';
+  document.getElementById('lbTable').innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function showLeaderboard() {
+  document.getElementById('initialsEntry').style.display = 'none';
+  document.getElementById('leaderboard').style.display = 'block';
+}
+
+async function doSubmitScore() {
+  if (scoreSubmitted) return;
+  const input = document.getElementById('initialsInput');
+  const status = document.getElementById('lbStatus');
+  const submitBtn = document.getElementById('submitScoreBtn');
+  let initials = input.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3);
+  if (!initials) initials = 'AAA';
+  localStorage.setItem(lastInitialsKey, initials);
+
+  const entry = { initials, score, wave, difficulty: diff };
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'SAVING...';
+
+  try {
+    await submitScore(entry);
+    scoreSubmitted = true;
+    const rows = await fetchLeaderboard();
+    // Highlight our row: first row matching our initials+score.
+    const youIndex = rows.findIndex(r => r.initials === initials && r.score === score);
+    renderLeaderboard(rows, youIndex);
+    showLeaderboard();
+    status.className = 'lbStatus';
+    status.textContent = youIndex >= 0
+      ? `You made the top 10 — rank #${youIndex + 1}!`
+      : 'Score saved. Not quite top 10 this time.';
+  } catch (err) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'RETRY SUBMIT';
+    status.className = 'lbStatus err';
+    status.textContent = 'No connection — could not reach the leaderboard. Try again?';
+  }
 }
 
 function draw() {
@@ -635,8 +806,18 @@ document.getElementById('startBtn').addEventListener('click', () => {
   newGame();
 });
 document.getElementById('restartBtn').addEventListener('click', () => {
+  document.getElementById('gameover').style.display = 'none';
   document.getElementById('menu').style.display = 'flex';
 });
+
+const initialsInput = document.getElementById('initialsInput');
+initialsInput.addEventListener('input', () => {
+  initialsInput.value = initialsInput.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3);
+});
+initialsInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); doSubmitScore(); }
+});
+document.getElementById('submitScoreBtn').addEventListener('click', doSubmitScore);
 document.getElementById('resumeBtn').addEventListener('click', () => togglePause(false));
 
 requestAnimationFrame(loop);
